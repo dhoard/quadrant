@@ -1,0 +1,8 @@
+github.com/ebitengine/purego v0.11.1 h1:2zpWRSQNVKN4eKsKO9eM1ILDgWfYMY9GwqRmK6XeQ/0=
+github.com/ebitengine/purego v0.11.1/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
+github.com/go-macos/accessibility v0.5.0 h1:a6drWMqJBK2iSVkGosdfjtMZbVmweRV7HqZHWCd0x7s=
+github.com/go-macos/accessibility v0.5.0/go.mod h1:W7uDW+hDa54hCPFWN4+IVeDi2p4CaYXIufiWVNSTWmo=
+github.com/go-macos/hotkey v0.11.0 h1:G0AAPpS9dcRx0d0M5ssPvW+e2bCDUQ3fw/mzxozquRI=
+github.com/go-macos/hotkey v0.11.0/go.mod h1:YJU1Lsn8JQboZ21FsvenQJTyuQa6nlRBmmjAkWMkSow=
+github.com/go-macos/objc v0.11.2 h1:d6+Zf3SA4zpclfFDcLB6Ttlb3o7cXt8Ah1oGhC+5/C8=
+github.com/go-macos/objc v0.11.2/go.mod h1:G2YcKu5C2Xs08vcM/CUUUeYUi9YeCHmkWcW+5RGwE/g=

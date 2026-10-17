@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for Quadrant.app, the bundle build.sh assembles around the
+  executable.
+
+  This file is the reason the application can be granted Accessibility at all.
+  macOS attaches a TCC grant to the application that asks for it, and an
+  unbundled executable is not an application: the grant goes to whatever
+  launched it -- the terminal, usually -- and the executable can never appear in
+  System Settings under its own name. Inside a bundle, with an identifier and a
+  signature, the grant belongs to Quadrant and System Settings lists it.
+
+  build.sh substitutes __VERSION__ with the build's version, because
+  CFBundleShortVersionString and CFBundleVersion must be digits and dots.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+
+  <key>CFBundleExecutable</key>
+  <string>Quadrant</string>
+
+  <!-- The application icon, generated at build time by cmd/icongen and
+       iconutil(1) into Contents/Resources/AppIcon.icns. It is drawn by the
+       program itself -- the mark the menu bar shows, on the rounded square
+       macOS gives an application -- so this project still ships no image
+       assets, and the Finder, the Accessibility pane and the About panel show
+       one drawing rather than three files that can drift apart. -->
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+
+  <!-- The identity the Accessibility grant attaches to. Changing it is not a
+       rename: it is a different application to TCC, and the grant starts over. -->
+  <key>CFBundleIdentifier</key>
+  <string>com.quadrant.app</string>
+
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+
+  <key>CFBundleName</key>
+  <string>Quadrant</string>
+  <key>CFBundleDisplayName</key>
+  <string>Quadrant</string>
+
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+
+  <key>CFBundleShortVersionString</key>
+  <string>__VERSION__</string>
+  <key>CFBundleVersion</key>
+  <string>__VERSION__</string>
+
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
+
+  <!-- The program uses -[NSApplication activate], which is macOS 14, and falls
+       back to the deprecated activateIgnoringOtherApps: below that. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+
+  <!-- LSUIElement: a menu-bar extra, not a Dock application: no Dock icon, no
+       application menu of its own, and no window that can be closed. The
+       program also sets the accessory activation policy at runtime, so it
+       behaves the same way when the executable is run on its own. -->
+  <key>LSUIElement</key>
+  <true/>
+
+  <key>NSHighResolutionCapable</key>
+  <true/>
+
+  <key>NSHumanReadableCopyright</key>
+  <string>© 2026 quadrant contributors · MIT licensed</string>
+</dict>
+</plist>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sample user LaunchAgent for quadrant: nothing loads it for you, and README's
+  "Launch at login" is the sequence that does.
+
+  The program is the executable inside Quadrant.app, not a loose copy: macOS
+  gives the Accessibility grant to the application a process belongs to, so
+  the program has to be started from inside the bundle for the grant to
+  survive. Quadrant.app therefore stays where it was installed.
+
+  The paths below are absolute on purpose: launchd expands neither ~ nor
+  environment variables, and a redirect path containing ~ makes the job fail
+  to spawn with exit code 78 (EX_CONFIG). Replace /Users/you with your home
+  directory; README's "Launch at login" shows the whole sequence with sed.
+
+  Install (with Quadrant.app copied into place first):
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.quadrant.agent.plist
+  Uninstall:
+    launchctl bootout gui/$(id -u)/com.quadrant.agent
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.quadrant.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/Applications/Quadrant.app/Contents/MacOS/Quadrant</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart after a crash (non-zero exit) only: a plain <true/> would
+       relaunch the program immediately after "Quit Quadrant". -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- A non-zero exit is usually a configuration the program will not run
+       with, which restarting cannot fix. Without this, launchd would restart
+       such a job every 10 seconds and fill the log with the same error. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <!-- The menu bar and window placement need a graphical session, so the job
+       stays out of SSH and other non-graphical sessions. -->
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/you/Library/Logs/quadrant/quadrant.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/Library/Logs/quadrant/quadrant.log</string>
+</dict>
+</plist>
