@@ -47,7 +47,15 @@ func TestParseBindings(t *testing.T) {
 		},
 		{
 			name:    "a key name nothing knows",
-			cfg:     changed(func(s *config.Shortcuts) { s.TopLeft = "control+option+nosuchkey" }),
+			cfg:     changed(func(s *config.Shortcuts) { s.TopLeft = "control+command+nosuchkey" }),
+			wantErr: true,
+		},
+		{
+			name: "an implicit shift duplicate",
+			cfg: changed(func(s *config.Shortcuts) {
+				s.TopLeft = "control+command+!"
+				s.TopRight = "control+command+shift+1"
+			}),
 			wantErr: true,
 		},
 	}

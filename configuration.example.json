@@ -1,13 +1,13 @@
 {
   "shortcuts": {
-    "top_left": "control+option+;",
-    "top_right": "control+option+'",
-    "bottom_left": "control+option+,",
-    "bottom_right": "control+option+/",
-    "left_half": "control+option+left",
-    "right_half": "control+option+right",
-    "top_half": "control+option+up",
-    "bottom_half": "control+option+down"
+    "top_left": "control+command+;",
+    "top_right": "control+command+'",
+    "bottom_left": "control+command+,",
+    "bottom_right": "control+command+/",
+    "left_half": "control+command+left_arrow",
+    "right_half": "control+command+right_arrow",
+    "top_half": "control+command+up_arrow",
+    "bottom_half": "control+command+down_arrow"
   },
   "padding_points": 0
 }

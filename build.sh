@@ -130,5 +130,6 @@ else
 fi
 
 echo "Built: $APP"
+echo "Install: ./install.sh"
 echo "Run:   open $APP"
 echo "       or in the foreground: $EXEC"

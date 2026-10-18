@@ -9,9 +9,9 @@ A minimal **macOS Apple Silicon (ARM64)** quadrant window placer, written in **G
 - Runs as an accessory application (`LSUIElement`, no Dock icon): the only UI is a menu-bar icon, whose menu holds **About Quadrant**, **Accessibility Settings…** and **Quit Quadrant** (⌘Q). No automatic tiling.
 - Ships as a **`Quadrant.app` bundle**, which is what lets macOS grant it Accessibility under its own name; an executable outside a bundle can only inherit the grant of whatever launched it and never appears in that list.
 - Starts without the grant rather than exiting: the menu-bar icon needs no permission, so the menu stays reachable, and the shortcuts are claimed the moment the grant is given — no restart. See [Accessibility permission](#accessibility-permission).
-- First run creates `~/.quadrant/configuration.json`; existing configuration is never overwritten, so edit its `shortcuts` values manually to adopt new defaults.
+- First run creates `~/.quadrant/configuration.json`; existing configuration is never overwritten. This version has no compatibility aliases: older spellings are rejected and must be edited manually.
 - Re-reads that file every 30 seconds, so shortcut and padding changes apply without a restart. An edit that does not parse or validate is ignored and the running configuration is kept; see [Reloading](#reloading).
-- Configurations written before half-screen support have only the four quadrant keys: the half-screen placements are optional, so such files keep working until you add `left_half`, `right_half`, `top_half` and `bottom_half` yourself.
+- The half-screen placements are optional: a configuration may omit `left_half`, `right_half`, `top_half` and `bottom_half`, and those placements are simply left unregistered.
 
 ## Build
 
@@ -21,8 +21,10 @@ Requires macOS on Apple Silicon and Go **1.26 or newer**. An Internet connection
 unzip quadrant.zip
 cd quadrant
 ./build.sh
-open dist/.build/Quadrant.app
+./install.sh
 ```
+
+`install.sh` copies the finished bundle to `/Applications/Quadrant.app` and handles the Accessibility reset; `open dist/.build/Quadrant.app` runs the build without installing it.
 
 `build.sh` resolves dependencies, runs tests, then creates **`./dist/.build/Quadrant.app`**: an `.app` bundle holding the executable in `Contents/MacOS/Quadrant` and [`packaging/Info.plist`](packaging/Info.plist) in `Contents/`. The `.build` directory is hidden on purpose: Spotlight does not index hidden items, and Spotlight's application index is where the macOS launcher gets its icons — built in the open, the build output is a second “Quadrant” in that list beside the installed one. (Opening it from the Finder registers it with LaunchServices anyway, so run the installed copy rather than that one.) This ZIP ships source, tests and the build script; it does **not** contain a prebuilt application or vendored modules. Future builds use the Go module cache.
 
@@ -64,7 +66,26 @@ QUADRANT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
 
 ## Install
 
-There is no installer script. The build output is the application, so installing it is copying it somewhere stable and — if you want it at login — loading the sample LaunchAgent:
+Build, then install:
+
+```sh
+./build.sh
+./install.sh
+```
+
+`install.sh` stops a running Quadrant, copies `dist/.build/Quadrant.app` to `/Applications/Quadrant.app`, verifies the copied signature, and relaunches the app. When the build is ad-hoc signed — the default — it also resets the Accessibility grant for `com.quadrant.app`, because the new signature no longer matches the old one, and opens the Accessibility pane. Switch Quadrant on there; the app polls every two seconds and registers the shortcuts without a restart.
+
+Use a different destination with `--dest`:
+
+```sh
+./install.sh --dest "$HOME/Applications"
+```
+
+If you use the sample LaunchAgent, install with `--dest "$HOME/Applications"` or change the plist's program path to `/Applications`. `install.sh` only restarts a loaded agent whose program path matches the installed bundle; otherwise it opens the app directly and says so.
+
+A stable signing identity (the local certificate or a Developer ID) gives the new bundle the same requirement, so the grant survives; `--keep-accessibility` skips the reset for those builds. `--no-relaunch` copies only.
+
+The build output is still just an application, so the manual equivalent is copying it somewhere stable and — if you want it at login — loading the sample LaunchAgent:
 
 ```sh
 ./build.sh
@@ -95,20 +116,30 @@ rm -rf ~/Applications/Quadrant.app
 
 `~/.quadrant/configuration.json` and the log in `~/Library/Logs/quadrant/` are yours: nothing removes them. An earlier version of this project installed a loose executable at `~/bin/quadrant` instead; it is not used any more, and `rm ~/bin/quadrant` is the end of it.
 
-Upgrading means building again and copying over the bundle. A new build is a new signature, and macOS treats a changed signature as a different application, so **the grant has to be given again** (see [Accessibility permission](#accessibility-permission)); signing with a Developer ID avoids that.
+Upgrading means building again and installing again:
+
+```sh
+./build.sh && ./install.sh
+```
+
+`install.sh` resets the stale Accessibility grant for an ad-hoc build and reopens the pane. Signing with a stable identity avoids the re-grant.
+
+**Breaking change.** The modifier identifiers are `control`, `command`, `shift`, and `option`; `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and glyph forms are invalid. Arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; `left`, `right`, `up`, `down`, `leftarrow`, and the other `*arrow` spellings are invalid. There is no automatic migration and no alias handling: an existing file that uses any of those spellings fails validation and must be edited.
 
 ## Default shortcuts
 
 | Shortcut | Placement |
 | --- | --- |
-| Control + Option + `;` | Top-left quadrant |
-| Control + Option + `'` | Top-right quadrant |
-| Control + Option + `,` | Bottom-left quadrant |
-| Control + Option + `/` | Bottom-right quadrant |
-| Control + Option + `←` | Left half |
-| Control + Option + `→` | Right half |
-| Control + Option + `↑` | Top half |
-| Control + Option + `↓` | Bottom half |
+| Control + Command + `;` | Top-left quadrant |
+| Control + Command + `'` | Top-right quadrant |
+| Control + Command + `,` | Bottom-left quadrant |
+| Control + Command + `/` | Bottom-right quadrant |
+| Control + Command + `←` | Left half |
+| Control + Command + `→` | Right half |
+| Control + Command + `↑` | Top half |
+| Control + Command + `↓` | Bottom half |
+
+In `configuration.json` the four arrow keys are written `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`.
 
 Each quadrant is 50% of the usable width × 50% of the usable height; each half is the full usable width or height. macOS applications can reject moves or impose minimum window sizes; such cases are logged to stderr.
 
@@ -125,20 +156,22 @@ Default content:
 ```json
 {
   "shortcuts": {
-    "top_left": "control+option+;",
-    "top_right": "control+option+'",
-    "bottom_left": "control+option+,",
-    "bottom_right": "control+option+/",
-    "left_half": "control+option+left",
-    "right_half": "control+option+right",
-    "top_half": "control+option+up",
-    "bottom_half": "control+option+down"
+    "top_left": "control+command+;",
+    "top_right": "control+command+'",
+    "bottom_left": "control+command+,",
+    "bottom_right": "control+command+/",
+    "left_half": "control+command+left_arrow",
+    "right_half": "control+command+right_arrow",
+    "top_half": "control+command+up_arrow",
+    "bottom_half": "control+command+down_arrow"
   },
   "padding_points": 0
 }
 ```
 
-Shortcuts use modifiers separated by `+`: `control`, `option`/`alt`, `shift`, `command`/`cmd`. Keys may be a character (`control+option+;`), a letter or digit (`control+shift+k`), or a named key such as `left`, `right`, `up`, `down`, `space` or `f5`. Valid examples are `control+option+;`, `control+shift+k`, `command+option+/`, and `control+option+left`. The default punctuation uses the named keys on a US/ANSI keyboard. `padding_points` insets each placement by the specified number of points (0–128).
+Shortcuts are written as one or more modifiers, a `+`, and exactly one key. The only modifier identifiers are `control`, `command`, `shift`, and `option`. There are no aliases: `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and the glyph forms are invalid. Multi-word identifiers use `_` between words. The arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; the short forms `left`, `right`, `up`, `down` and concatenated forms such as `leftarrow` are invalid. Other named keys are `space`, `return`, `tab`, `delete`, `escape`, and `f1`–`f15`.
+
+A key may also be a letter, a digit, or a symbol. Letters are case-insensitive: `control+command+A` and `control+command+a` are the same binding, and Shift is not implied. Write `shift` explicitly when you need it. A shifted symbol implies Shift, so `control+command+!` is `control+command+shift+1`. A literal `+` key may be written `control+command++`, `control+command+\+`, or `control+command+plus`. In JSON, a literal `\` or `"` may be written as `backslash` or `doublequote` to avoid escaping. `padding_points` insets each placement by the specified number of points (0–128).
 
 Validate configuration without running the hotkey service:
 
@@ -154,7 +187,9 @@ Use a different configuration file when developing:
 
 Running the executable itself rather than `open dist/.build/Quadrant.app` is how the command-line flags are reached: `-check-config` validates and exits before any permission is involved.
 
-All configured keys must be distinct. The four quadrant bindings are required; the four half-screen bindings are optional and an empty value disables that placement. macOS reserves some plain `Control`+arrow combinations for Mission Control and Spaces, but the `Control`+`Option`+arrow defaults above are not system shortcuts. Existing invalid configuration is never reset. If another application or macOS has reserved a shortcut, startup and reload report an error rather than silently changing the binding. Some foreground apps may have overlapping key equivalents which macOS cannot detect; customize bindings if necessary.
+All configured keys must be distinct. The four quadrant bindings are required; the four half-screen bindings are optional and an empty value disables that placement. macOS reserves some plain Control+arrow combinations for Mission Control and Spaces; the Control+Command defaults above are not in the built-in symbolic-hotkey list this project checks, but a system or application shortcut can still overlap and is not always detectable. Startup and reload report a detectable conflict rather than silently changing the binding. Some foreground apps may have overlapping key equivalents which macOS cannot detect; customize bindings if necessary. Existing invalid configuration is never reset.
+
+`-check-config` validates the file and its bindings; it does not register the hot keys, so a conflict with another application is reported when the program starts or reloads.
 
 ### Reloading
 
@@ -309,6 +344,7 @@ Because launchd, not Terminal, is then the parent process, the grant has to be t
 ```text
 quadrant/
 ├── build.sh
+├── install.sh                 # Copies the built bundle and handles its Accessibility grant
 ├── packaging/Info.plist       # Makes Quadrant.app an application, not a binary
 ├── go.mod
 ├── configuration.example.json
@@ -318,7 +354,7 @@ quadrant/
 ├── internal/geometry/        # Quadrant/half placement math and tests
 ├── internal/grant/           # Waiting for the Accessibility grant while running, tests
 ├── internal/icon/            # The sizes and file names an .iconset is made of, tests
-├── internal/shortcut/        # Keyboard bindings, aliases, tests
+├── internal/shortcut/        # Modifier IDs, key tables, binding parser, tests
 ├── internal/macos/           # NSScreen.visibleFrame, coordinate conversion, menu-bar extra, icon art
 ├── launchd/                  # Sample user LaunchAgent (not installed automatically)
 └── dist/                     # Generated app: .build/Quadrant.app after ./build.sh
@@ -331,7 +367,7 @@ quadrant/
 - The bundle is ad-hoc signed unless `QUADRANT_SIGN_IDENTITY` names a Developer ID. An ad-hoc signature changes on every rebuild, and macOS treats a changed signature as a different application, so the grant has to be given again after a rebuild — check it with `codesign --verify --strict` after copying the bundle into place, because a signature macOS rejects cannot hold a grant at all.
 - Versions before the bundle installed a loose executable in `~/bin`; nothing points at it any more, but an old LaunchAgent may still be loaded. Stop it with `launchctl bootout gui/$(id -u)/com.quadrant.agent` before loading the current one.
 - Only standard, movable application windows are expected to work. Full-screen apps, some dialog panels, or apps with fixed geometry may reject resizing.
-- The Carbon API uses **key positions**; library registration is set to interpret printed keyboard legends where possible for international keyboard layouts.
+- The Carbon API uses **key positions**; library registration interprets printed keyboard legends where possible for international keyboard layouts. Letter, digit, and named-key bindings follow that remapping. Symbol bindings use US/ANSI positions; on a non-US layout, prefer a named key or verify the symbol on the target layout.
 - Application windows are changed *once per keypress*. There is no ongoing automatic tiling; polling the configuration file is the only periodic activity.
 - Reloading is a 30-second poll, not a filesystem notification, so a change can take up to that long to apply. It also re-registers every shortcut rather than only the ones that changed.
 - The menu-bar icon and the About panel are built on AppKit through `go-macos/objc`, so they need a session with a menu bar. A background instance with nobody logged in starts without the icon and says so in the log.

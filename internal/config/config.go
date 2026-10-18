@@ -43,10 +43,10 @@ type Configuration struct {
 func Default() Configuration {
 	return Configuration{
 		Shortcuts: Shortcuts{
-			TopLeft: "control+option+;", TopRight: "control+option+'",
-			BottomLeft: "control+option+,", BottomRight: "control+option+/",
-			LeftHalf: "control+option+left", RightHalf: "control+option+right",
-			TopHalf: "control+option+up", BottomHalf: "control+option+down",
+			TopLeft: "control+command+;", TopRight: "control+command+'",
+			BottomLeft: "control+command+,", BottomRight: "control+command+/",
+			LeftHalf: "control+command+left_arrow", RightHalf: "control+command+right_arrow",
+			TopHalf: "control+command+up_arrow", BottomHalf: "control+command+down_arrow",
 		},
 		PaddingPoints: 0,
 	}
