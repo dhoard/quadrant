@@ -2,7 +2,7 @@
   "shortcuts": {
     "top_left": "control+command+;",
     "top_right": "control+command+'",
-    "bottom_left": "control+command+,",
+    "bottom_left": "control+command+.",
     "bottom_right": "control+command+/",
     "left_half": "control+command+left_arrow",
     "right_half": "control+command+right_arrow",
