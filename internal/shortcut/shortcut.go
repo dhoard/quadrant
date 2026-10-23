@@ -4,6 +4,7 @@ package shortcut
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/go-macos/hotkey"
@@ -96,8 +97,6 @@ var symbolKeys = map[string]keySpec{
 	"_": {hotkey.KeyMinus, true},
 
 	"=": {hotkey.KeyEqual, false},
-	"+": {hotkey.KeyEqual, true},
-
 	"[": {hotkey.KeyLeftBracket, false},
 	"{": {hotkey.KeyLeftBracket, true},
 
@@ -155,45 +154,21 @@ var alnumKeys = func() map[string]hotkey.Key {
 
 // Parse requires exactly one key and at least one modifier. It accepts only
 // the identifiers in modifierIDs and namedKeys plus literal letters, digits,
-// and symbols; there are no aliases.
+// and symbols; there are no aliases. `+` separates the tokens, so the literal
+// plus key is written `plus`.
 func Parse(text string) (hotkey.Combo, error) {
-	rest := strings.TrimSpace(text)
-	if rest == "" {
-		return hotkey.Combo{}, fmt.Errorf("empty binding; expected modifiers+key")
+	tokens, err := splitBinding(text)
+	if err != nil {
+		return hotkey.Combo{}, err
 	}
-
-	var mods hotkey.Modifier
-	for {
-		token, tail, found := cutAtPlus(rest)
-		if !found {
-			break
-		}
-		name := strings.ToLower(strings.TrimSpace(token))
-		bit, ok := modifierIDs[name]
-		if !ok {
-			break
-		}
-		if mods&bit != 0 {
-			return hotkey.Combo{}, fmt.Errorf("%q: duplicate modifier %q", text, name)
-		}
-		mods |= bit
-		rest = strings.TrimSpace(tail)
+	if len(tokens) < 2 {
+		return hotkey.Combo{}, fmt.Errorf("%q: expected at least one modifier and one key", text)
 	}
-
-	if mods == 0 {
-		return hotkey.Combo{}, fmt.Errorf("%q: expected at least one modifier from control, command, shift, option", text)
+	mods, err := parseModifiers(tokens[:len(tokens)-1], text)
+	if err != nil {
+		return hotkey.Combo{}, err
 	}
-
-	keyText := strings.TrimSpace(rest)
-	if keyText == "" {
-		return hotkey.Combo{}, fmt.Errorf("%q: expected a key after the modifiers", text)
-	}
-	// A key is one token. A literal + is the one exception; it is handled by
-	// symbolKeys, including its escaped form \+.
-	if keyText != "+" && containsUnescapedPlus(keyText) {
-		return hotkey.Combo{}, fmt.Errorf("%q: invalid modifier or key sequence %q", text, keyText)
-	}
-
+	keyText := tokens[len(tokens)-1]
 	spec, ok := lookupKey(keyText)
 	if !ok {
 		return hotkey.Combo{}, fmt.Errorf("%q: unknown key %q", text, keyText)
@@ -204,39 +179,111 @@ func Parse(text string) (hotkey.Combo, error) {
 	return hotkey.Combo{Key: spec.key, Mods: mods}, nil
 }
 
-// cutAtPlus cuts at the first + that is not escaped as \+.
-func cutAtPlus(s string) (before, after string, found bool) {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '+' {
-			i++
-			continue
-		}
-		if s[i] == '+' {
-			return s[:i], s[i+1:], true
-		}
+// ComparisonKey returns a canonical form of a binding for case-sensitive map
+// comparison. Modifier tokens are ordered canonically, but their text and the
+// key token keep their original case. The key token must be last; only
+// modifier tokens may be permuted.
+func ComparisonKey(text string) (string, error) {
+	tokens, err := splitBinding(text)
+	if err != nil {
+		return "", err
 	}
-	return s, "", false
+	if len(tokens) < 2 {
+		return "", fmt.Errorf("%q: expected at least one modifier and one key", text)
+	}
+
+	type modifierToken struct {
+		bit  hotkey.Modifier
+		text string
+	}
+	mods := make([]modifierToken, 0, len(tokens)-1)
+	var seen hotkey.Modifier
+	for _, token := range tokens[:len(tokens)-1] {
+		bit, ok := modifierIDs[strings.ToLower(token)]
+		if !ok {
+			return "", fmt.Errorf("%q: unknown modifier %q", text, token)
+		}
+		if seen&bit != 0 {
+			return "", fmt.Errorf("%q: duplicate modifier %q", text, token)
+		}
+		seen |= bit
+		mods = append(mods, modifierToken{bit: bit, text: token})
+	}
+	sort.SliceStable(mods, func(i, j int) bool {
+		return modifierRank(mods[i].bit) < modifierRank(mods[j].bit)
+	})
+
+	keyText := tokens[len(tokens)-1]
+	if _, ok := lookupKey(keyText); !ok {
+		return "", fmt.Errorf("%q: unknown key %q", text, keyText)
+	}
+	parts := make([]string, 0, len(mods)+1)
+	for _, mod := range mods {
+		parts = append(parts, mod.text)
+	}
+	parts = append(parts, keyText)
+	return strings.Join(parts, "+"), nil
 }
 
-// containsUnescapedPlus reports whether s has a + that is not escaped as \+.
-func containsUnescapedPlus(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '+' {
-			i++
-			continue
-		}
-		if s[i] == '+' {
-			return true
-		}
+// splitBinding splits on the separator and rejects empty tokens. This is what
+// rejects the old ++ and \+ literal-plus spellings: `plus` is the only literal
+// plus key.
+func splitBinding(text string) ([]string, error) {
+	rest := strings.TrimSpace(text)
+	if rest == "" {
+		return nil, fmt.Errorf("empty binding; expected modifiers+key")
 	}
-	return false
+	parts := strings.Split(rest, "+")
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("%q: empty modifier or key", text)
+		}
+		parts[i] = part
+	}
+	return parts, nil
+}
+
+func parseModifiers(tokens []string, text string) (hotkey.Modifier, error) {
+	var mods hotkey.Modifier
+	for _, token := range tokens {
+		name := strings.ToLower(token)
+		bit, ok := modifierIDs[name]
+		if !ok {
+			return 0, fmt.Errorf("%q: unknown modifier %q", text, token)
+		}
+		if mods&bit != 0 {
+			return 0, fmt.Errorf("%q: duplicate modifier %q", text, name)
+		}
+		mods |= bit
+	}
+	if mods == 0 {
+		return 0, fmt.Errorf("%q: expected at least one modifier from control, command, shift, option", text)
+	}
+	return mods, nil
+}
+
+// modifierRank gives the canonical reporting order: control, command, shift,
+// option.
+func modifierRank(bit hotkey.Modifier) int {
+	switch bit {
+	case hotkey.Control:
+		return 0
+	case hotkey.Command:
+		return 1
+	case hotkey.Shift:
+		return 2
+	case hotkey.Option:
+		return 3
+	default:
+		return 4
+	}
 }
 
 // lookupKey resolves one key token. Literal symbols are matched exactly;
 // names and alphanumerics are matched case-insensitively.
 func lookupKey(text string) (keySpec, bool) {
 	text = strings.TrimSpace(text)
-	text = strings.ReplaceAll(text, `\+`, `+`)
 	if text == "" {
 		return keySpec{}, false
 	}

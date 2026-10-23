@@ -1,6 +1,6 @@
 # quadrant
 
-A minimal **macOS Apple Silicon (ARM64)** quadrant window placer, written in **Go 1.26**. Press a global shortcut to move and resize the **currently focused window** to a quadrant of its current display.
+A minimal **macOS Apple Silicon (ARM64)** grid window placer, written in **Go 1.26**. Press a global shortcut to move and resize the **currently focused window** to a configured region of a configurable rows × columns grid on its current display.
 
 - Pure Go (`CGO_ENABLED=0`): no Swift, Objective-C source, or cgo.
 - Uses Carbon hotkeys, macOS Accessibility APIs and `NSScreen.visibleFrame` via Go bindings.
@@ -9,9 +9,9 @@ A minimal **macOS Apple Silicon (ARM64)** quadrant window placer, written in **G
 - Runs as an accessory application (`LSUIElement`, no Dock icon): the only UI is a menu-bar icon, whose menu holds **About Quadrant**, **Accessibility Settings…** and **Quit Quadrant** (⌘Q). No automatic tiling.
 - Ships as a **`Quadrant.app` bundle**, which is what lets macOS grant it Accessibility under its own name; an executable outside a bundle can only inherit the grant of whatever launched it and never appears in that list.
 - Starts without the grant rather than exiting: the menu-bar icon needs no permission, so the menu stays reachable, and the shortcuts are claimed the moment the grant is given — no restart. See [Accessibility permission](#accessibility-permission).
-- First run creates `~/.quadrant/configuration.json`; existing configuration is never overwritten. This version has no compatibility aliases: older spellings are rejected and must be edited manually.
-- Re-reads that file every 30 seconds, so shortcut and padding changes apply without a restart. An edit that does not parse or validate is ignored and the running configuration is kept; see [Reloading](#reloading).
-- The half-screen placements are optional: a configuration may omit `left_half`, `right_half`, `top_half` and `bottom_half`, and those placements are simply left unregistered.
+- First run creates `~/.quadrant/configuration.json`; existing configuration is never overwritten. The configuration format is intentionally breaking: old named-placement files and the escaped `++` / `\+` literal-plus spellings are rejected and must be edited manually.
+- Re-reads that file every 30 seconds, so grid, shortcut, region, and padding changes apply without a restart. An edit that does not parse or validate is ignored and the running configuration is kept; see [Reloading](#reloading).
+- The default layout is a 2×2 grid with the four quadrants and four halves expressed as cells and spans. Any `rows` × `columns` grid and rectangular region can be configured; see [Configuration](#configuration).
 
 ## Build
 
@@ -26,7 +26,7 @@ cd quadrant
 
 `install.sh` copies the finished bundle to `/Applications/Quadrant.app` and handles the Accessibility reset; `open dist/.build/Quadrant.app` runs the build without installing it.
 
-`build.sh` resolves dependencies, runs tests, then creates **`./dist/.build/Quadrant.app`**: an `.app` bundle holding the executable in `Contents/MacOS/Quadrant` and [`packaging/Info.plist`](packaging/Info.plist) in `Contents/`. The `.build` directory is hidden on purpose: Spotlight does not index hidden items, and Spotlight's application index is where the macOS launcher gets its icons — built in the open, the build output is a second “Quadrant” in that list beside the installed one. (Opening it from the Finder registers it with LaunchServices anyway, so run the installed copy rather than that one.) This ZIP ships source, tests and the build script; it does **not** contain a prebuilt application or vendored modules. Future builds use the Go module cache.
+`build.sh` detects a Rosetta-translated shell and re-executes itself under arm64, so a plain `./build.sh` works without `arch` or `GOFLAGS` overrides. It resolves dependencies, runs tests, then creates **`./dist/.build/Quadrant.app`**: an `.app` bundle holding the executable in `Contents/MacOS/Quadrant` and [`packaging/Info.plist`](packaging/Info.plist) in `Contents/`. The `.build` directory is hidden on purpose: Spotlight does not index hidden items, and Spotlight's application index is where the macOS launcher gets its icons — built in the open, the build output is a second “Quadrant” in that list beside the installed one. (Opening it from the Finder registers it with LaunchServices anyway, so run the installed copy rather than that one.) This ZIP ships source, tests and the build script; it does **not** contain a prebuilt application or vendored modules. Future builds use the Go module cache.
 
 The bundle is signed during the build. [Signing](#signing) explains what that signature is for and how to make the Accessibility grant survive rebuilds.
 
@@ -124,7 +124,7 @@ Upgrading means building again and installing again:
 
 `install.sh` resets the stale Accessibility grant for an ad-hoc build and reopens the pane. Signing with a stable identity avoids the re-grant.
 
-**Breaking change.** The modifier identifiers are `control`, `command`, `shift`, and `option`; `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and glyph forms are invalid. Arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; `left`, `right`, `up`, `down`, `leftarrow`, and the other `*arrow` spellings are invalid. There is no automatic migration and no alias handling: an existing file that uses any of those spellings fails validation and must be edited.
+**Breaking change.** The configuration format uses top-level `rows` and `columns` with a `shortcuts` object keyed by key combination. The old named-placement object and the escaped `++` / `\+` literal-plus spellings are rejected with no automatic migration. The modifier identifiers are `control`, `command`, `shift`, and `option`; `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and glyph forms are invalid. Arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; `left`, `right`, `up`, `down`, `leftarrow`, and the other `*arrow` spellings are invalid. An existing file that uses any of those spellings fails validation and must be edited.
 
 ## Default shortcuts
 
@@ -132,16 +132,16 @@ Upgrading means building again and installing again:
 | --- | --- |
 | Control + Command + `;` | Top-left quadrant |
 | Control + Command + `'` | Top-right quadrant |
-| Control + Command + `,` | Bottom-left quadrant |
+| Control + Command + `.` | Bottom-left quadrant |
 | Control + Command + `/` | Bottom-right quadrant |
 | Control + Command + `←` | Left half |
 | Control + Command + `→` | Right half |
 | Control + Command + `↑` | Top half |
 | Control + Command + `↓` | Bottom half |
 
-In `configuration.json` the four arrow keys are written `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`.
+The default grid is 2 rows × 2 columns. The four quadrants are single cells; the four halves are spans of both rows or both columns. In `configuration.json` the four arrow keys are written `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`.
 
-Each quadrant is 50% of the usable width × 50% of the usable height; each half is the full usable width or height. macOS applications can reject moves or impose minimum window sizes; such cases are logged to stderr.
+Each configured region is a rectangular group of grid cells. A quadrant is one cell of the default grid; a half spans both rows or both columns. macOS applications can reject moves or impose minimum window sizes; such cases are logged to stderr.
 
 ## Configuration
 
@@ -155,23 +155,60 @@ Default content:
 
 ```json
 {
+  "rows": 2,
+  "columns": 2,
   "shortcuts": {
-    "top_left": "control+command+;",
-    "top_right": "control+command+'",
-    "bottom_left": "control+command+,",
-    "bottom_right": "control+command+/",
-    "left_half": "control+command+left_arrow",
-    "right_half": "control+command+right_arrow",
-    "top_half": "control+command+up_arrow",
-    "bottom_half": "control+command+down_arrow"
+    "control+command+;": {"row": 1, "column": 1, "row_span": 1, "column_span": 1},
+    "control+command+'": {"row": 1, "column": 2, "row_span": 1, "column_span": 1},
+    "control+command+.": {"row": 2, "column": 1, "row_span": 1, "column_span": 1},
+    "control+command+/": {"row": 2, "column": 2, "row_span": 1, "column_span": 1},
+    "control+command+left_arrow": {"row": 1, "column": 1, "row_span": 2, "column_span": 1},
+    "control+command+right_arrow": {"row": 1, "column": 2, "row_span": 2, "column_span": 1},
+    "control+command+up_arrow": {"row": 1, "column": 1, "row_span": 1, "column_span": 2},
+    "control+command+down_arrow": {"row": 2, "column": 1, "row_span": 1, "column_span": 2}
   },
   "padding_points": 0
 }
 ```
 
-Shortcuts are written as one or more modifiers, a `+`, and exactly one key. The only modifier identifiers are `control`, `command`, `shift`, and `option`. There are no aliases: `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and the glyph forms are invalid. Multi-word identifiers use `_` between words. The arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; the short forms `left`, `right`, `up`, `down` and concatenated forms such as `leftarrow` are invalid. Other named keys are `space`, `return`, `tab`, `delete`, `escape`, and `f1`–`f15`.
+`rows` and `columns` are required positive integers. They define one uniform grid over the usable area of the focused window's display. `row` and `column` are required and one-indexed: row 1 is the top row and column 1 is the left column. `row_span` and `column_span` are optional and default to 1; the whole region must stay inside the grid. At least one shortcut is required. The order of entries in the `shortcuts` object is not significant, and a repeated JSON key is rejected rather than silently keeping the last target.
 
-A key may also be a letter, a digit, or a symbol. Letters are case-insensitive: `control+command+A` and `control+command+a` are the same binding, and Shift is not implied. Write `shift` explicitly when you need it. A shifted symbol implies Shift, so `control+command+!` is `control+command+shift+1`. A literal `+` key may be written `control+command++`, `control+command+\+`, or `control+command+plus`. In JSON, a literal `\` or `"` may be written as `backslash` or `doublequote` to avoid escaping. `padding_points` insets each placement by the specified number of points (0–128).
+Bindings are written as one or more modifiers, a `+`, and exactly one key. The key token must be last; modifier order may be any order, so `control+command+1` and `command+control+1` are the same mapping. Shortcut keys are compared case-sensitively, with surrounding whitespace ignored and only modifier order normalized. The only modifier identifiers are `control`, `command`, `shift`, and `option`. There are no aliases: `ctrl`, `cmd`, `opt`, `alt`, `meta`, `ctl`, and the glyph forms are invalid. Multi-word identifiers use `_` between words. The arrow keys are `left_arrow`, `right_arrow`, `up_arrow`, and `down_arrow`; the short forms `left`, `right`, `up`, `down` and concatenated forms such as `leftarrow` are invalid. Other named keys are `space`, `return`, `tab`, `delete`, `escape`, and `f1`–`f15`.
+
+A key may also be a letter, a digit, or a symbol. Letters are case-insensitive when resolving the physical key: `control+command+A` and `control+command+a` name the same key, and an uppercase letter does not imply Shift. Because shortcut-map comparison is case-sensitive, those two spellings cannot both appear; the physical-combination check rejects the pair. Write `shift` explicitly when you need it. A shifted symbol implies Shift, so `control+command+!` is `control+command+shift+1`. The literal `+` key is written `control+command+plus`; `control+command++` and `control+command+\+` are invalid. In JSON, a literal `\` or `"` may be written as `backslash` or `doublequote` to avoid escaping.
+
+`padding_points` is the spacing between the window's outer edges and the boundaries of its assigned grid region: each of the four outer edges is inset by that many points (0–128). A spanning region receives a single outer inset, with no internal gutters. Two adjacent regions each inset their own window, so the visible gap between those windows is twice the padding value.
+
+For example, this 4×4 grid defines two 2×2 regions — the top-left and top-right halves of the screen:
+
+```json
+{
+  "rows": 4,
+  "columns": 4,
+  "shortcuts": {
+    "control+command+1": {"row": 1, "column": 1, "row_span": 2, "column_span": 2},
+    "control+command+2": {"row": 1, "column": 3, "row_span": 2, "column_span": 2}
+  },
+  "padding_points": 0
+}
+```
+
+### Converting an old configuration
+
+There is no automatic migration. For the old default layout, set `rows` and `columns` to 2, make each old binding the key of a `shortcuts` entry, and use this mapping for the region value:
+
+| Old name | New region |
+| --- | --- |
+| `top_left` | `"row": 1, "column": 1, "row_span": 1, "column_span": 1` |
+| `top_right` | `"row": 1, "column": 2, "row_span": 1, "column_span": 1` |
+| `bottom_left` | `"row": 2, "column": 1, "row_span": 1, "column_span": 1` |
+| `bottom_right` | `"row": 2, "column": 2, "row_span": 1, "column_span": 1` |
+| `left_half` | `"row": 1, "column": 1, "row_span": 2, "column_span": 1` |
+| `right_half` | `"row": 1, "column": 2, "row_span": 2, "column_span": 1` |
+| `top_half` | `"row": 1, "column": 1, "row_span": 1, "column_span": 2` |
+| `bottom_half` | `"row": 2, "column": 1, "row_span": 1, "column_span": 2` |
+
+Bindings that used `control+command++` or `control+command+\+` must be rewritten as `control+command+plus`.
 
 Validate configuration without running the hotkey service:
 
@@ -187,7 +224,7 @@ Use a different configuration file when developing:
 
 Running the executable itself rather than `open dist/.build/Quadrant.app` is how the command-line flags are reached: `-check-config` validates and exits before any permission is involved.
 
-All configured keys must be distinct. The four quadrant bindings are required; the four half-screen bindings are optional and an empty value disables that placement. macOS reserves some plain Control+arrow combinations for Mission Control and Spaces; the Control+Command defaults above are not in the built-in symbolic-hotkey list this project checks, but a system or application shortcut can still overlap and is not always detectable. Startup and reload report a detectable conflict rather than silently changing the binding. Some foreground apps may have overlapping key equivalents which macOS cannot detect; customize bindings if necessary. Existing invalid configuration is never reset.
+At least one shortcut is required, and all configured keys must be distinct after normalization. Modifier-order permutations are one mapping; two entries that resolve to the same physical hotkey are rejected. Every region must fit inside the configured grid. macOS reserves some plain Control+arrow combinations for Mission Control and Spaces; the Control+Command defaults above are not in the built-in symbolic-hotkey list this project checks, but a system or application shortcut can still overlap and is not always detectable. Startup and reload report a detectable conflict rather than silently changing the binding. Some foreground apps may have overlapping key equivalents which macOS cannot detect; customize bindings if necessary. Existing invalid configuration is never reset.
 
 `-check-config` validates the file and its bindings; it does not register the hot keys, so a conflict with another application is reported when the program starts or reloads.
 
@@ -199,7 +236,7 @@ Content that has changed is loaded and validated before anything in the running 
 
 - **Invalid file** — a file that does not parse, or that breaks one of the rules above, is never applied. The configuration in effect keeps running, the failure is reported once (a later poll of that same unchanged content stays quiet), and the file is tried again only after it changes.
 - **Shortcut already taken** — a valid file whose bindings cannot all be registered is reported, and the previous shortcuts are restored, so you are never left with fewer shortcuts than you had.
-- **Valid file** — the new shortcuts are registered, the new `padding_points` takes effect on the next keypress, and one `configuration reloaded: <path>` line is logged.
+- **Valid file** — the new shortcuts, grid, regions, and `padding_points` take effect on the next keypress, and one `configuration reloaded: <path>` line is logged.
 
 `-check-config` validates and exits without watching. A file saved while the program is still starting up is applied by the first poll after it starts.
 
@@ -226,7 +263,7 @@ After the grant:
 
 ```text
 quadrant: Accessibility permission granted; registering the shortcuts
-quadrant: registered ⌃⌥; → top_left
+quadrant: registered ⌃⌘; → row 1, column 1, 1x1
 ```
 
 If **Quadrant** is not in that list, add it with the **+** button and ⌘⇧G to `/Applications/Quadrant.app`.
@@ -349,9 +386,10 @@ quadrant/
 ├── go.mod
 ├── configuration.example.json
 ├── cmd/quadrant/main.go       # App setup, menu-bar extra, shortcut routing, AX placement, reload
+├── cmd/quadrant/window.go     # Which window to move: the focused-window query and its fallback
 ├── cmd/icongen/main.go        # Writes the icon set the bundle's .icns is built from
 ├── internal/config/          # First-run config, validation, reload polling, tests
-├── internal/geometry/        # Quadrant/half placement math and tests
+├── internal/geometry/        # Grid/region placement math and tests
 ├── internal/grant/           # Waiting for the Accessibility grant while running, tests
 ├── internal/icon/            # The sizes and file names an .iconset is made of, tests
 ├── internal/shortcut/        # Modifier IDs, key tables, binding parser, tests
@@ -367,6 +405,7 @@ quadrant/
 - The bundle is ad-hoc signed unless `QUADRANT_SIGN_IDENTITY` names a Developer ID. An ad-hoc signature changes on every rebuild, and macOS treats a changed signature as a different application, so the grant has to be given again after a rebuild — check it with `codesign --verify --strict` after copying the bundle into place, because a signature macOS rejects cannot hold a grant at all.
 - Versions before the bundle installed a loose executable in `~/bin`; nothing points at it any more, but an old LaunchAgent may still be loaded. Stop it with `launchctl bootout gui/$(id -u)/com.quadrant.agent` before loading the current one.
 - Only standard, movable application windows are expected to work. Full-screen apps, some dialog panels, or apps with fixed geometry may reject resizing.
+- **Which window is moved.** The first query is macOS's own answer to “what has focus”: the system-wide Accessibility element's `kAXFocusedApplicationAttribute`, then that application's `kAXFocusedWindowAttribute`. Some applications answer the first one with no value at all (`AXError -25212`, *the attribute has no value*), so the window cannot be named that way; Chromium applications are where this was first seen, and nothing about the fallback is specific to them. Quadrant then lists the running applications, takes the one reporting itself frontmost, and moves its first standard, unminimized window ([`cmd/quadrant/window.go`](cmd/quadrant/window.go)). Non-window elements are skipped — the Finder answers that list with its desktop, an `AXScrollArea` covering every display — and a minimized window is used only when the application has nothing else, because it keeps a position and appears where it was put when restored. The fallback cannot tell *which* of several windows has focus, because that is what failed: it takes the first, and logs a notice naming the application and window it chose. When the fallback fails as well, the error carries both reasons (`…: the attribute has no value; frontmost application fallback: …`). Both routes are covered by tests that supply the Accessibility answers themselves, because whether an application answers the focused-application query depends on the application and cannot be arranged on demand.
 - The Carbon API uses **key positions**; library registration interprets printed keyboard legends where possible for international keyboard layouts. Letter, digit, and named-key bindings follow that remapping. Symbol bindings use US/ANSI positions; on a non-US layout, prefer a named key or verify the symbol on the target layout.
 - Application windows are changed *once per keypress*. There is no ongoing automatic tiling; polling the configuration file is the only periodic activity.
 - Reloading is a 30-second poll, not a filesystem notification, so a change can take up to that long to apply. It also re-registers every shortcut rather than only the ones that changed.

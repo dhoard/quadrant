@@ -1,13 +1,55 @@
 {
+  "rows": 2,
+  "columns": 2,
   "shortcuts": {
-    "top_left": "control+command+;",
-    "top_right": "control+command+'",
-    "bottom_left": "control+command+.",
-    "bottom_right": "control+command+/",
-    "left_half": "control+command+left_arrow",
-    "right_half": "control+command+right_arrow",
-    "top_half": "control+command+up_arrow",
-    "bottom_half": "control+command+down_arrow"
+    "control+command+;": {
+      "row": 1,
+      "column": 1,
+      "row_span": 1,
+      "column_span": 1
+    },
+    "control+command+'": {
+      "row": 1,
+      "column": 2,
+      "row_span": 1,
+      "column_span": 1
+    },
+    "control+command+.": {
+      "row": 2,
+      "column": 1,
+      "row_span": 1,
+      "column_span": 1
+    },
+    "control+command+/": {
+      "row": 2,
+      "column": 2,
+      "row_span": 1,
+      "column_span": 1
+    },
+    "control+command+left_arrow": {
+      "row": 1,
+      "column": 1,
+      "row_span": 2,
+      "column_span": 1
+    },
+    "control+command+right_arrow": {
+      "row": 1,
+      "column": 2,
+      "row_span": 2,
+      "column_span": 1
+    },
+    "control+command+up_arrow": {
+      "row": 1,
+      "column": 1,
+      "row_span": 1,
+      "column_span": 2
+    },
+    "control+command+down_arrow": {
+      "row": 2,
+      "column": 1,
+      "row_span": 1,
+      "column_span": 2
+    }
   },
   "padding_points": 0
 }

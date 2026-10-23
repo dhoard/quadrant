@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This project targets Apple Silicon. A Rosetta-translated shell makes universal
+# tools such as git and xcrun choose their x86_64 slices, while the installed
+# Command Line Tools libraries are arm64-only. Re-exec under arm64 so a plain
+# ./build.sh invocation works without extra flags or environment variables.
+if [[ "$(uname -s)" == "Darwin" && "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" == "1" ]]; then
+  echo "build.sh: current shell is running under Rosetta; re-executing under arm64" >&2
+  exec arch -arm64 /bin/bash "${BASH_SOURCE[0]}" "$@"
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 

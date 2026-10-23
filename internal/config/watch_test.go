@@ -189,8 +189,8 @@ func TestWatchIgnoresInvalidFile(t *testing.T) {
 	rec := newApplyRecorder()
 	startWatcher(t, path, rec.apply)
 
-	// Valid JSON, but the required top_left quadrant is missing.
-	if err := os.WriteFile(path, []byte(`{"shortcuts":{"top_left":""}}`), 0600); err != nil {
+	// Valid JSON, but row 3 is outside the configured 2-row grid.
+	if err := os.WriteFile(path, []byte(`{"rows":2,"columns":2,"shortcuts":{"control+command+;":{"row":3,"column":1}},"padding_points":0}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the invalid file to be reported", func() bool {

@@ -1,8 +1,9 @@
 // quadrant provides global shortcuts for arranging the focused macOS window
-// into quadrants or screen halves. It is a background accessory app, not a full
-// window manager. While it runs it re-reads its configuration file every 30
-// seconds, so shortcut and padding changes apply without a restart. An icon in
-// the menu bar carries About and Quit; nothing else is on screen.
+// into configured regions of a rows×columns grid. It is a background accessory
+// app, not a full window manager. While it runs it re-reads its configuration
+// file every 30 seconds, so grid, shortcut, region, and padding changes apply
+// without a restart. An icon in the menu bar carries About and Quit; nothing
+// else is on screen.
 package main
 
 import (
@@ -13,7 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -48,9 +49,15 @@ const (
 var version = "dev"
 
 type binding struct {
-	placement geometry.Placement
-	combo     hotkey.Combo
-	label     string
+	grid    geometry.Grid
+	region  geometry.Region
+	padding float64
+	combo   hotkey.Combo
+	label   string
+}
+
+func regionLabel(r geometry.Region) string {
+	return fmt.Sprintf("row %d, column %d, %dx%d", r.Row, r.Column, r.RowSpan, r.ColumnSpan)
 }
 
 // service holds the configuration that is in service and the hot keys that are
@@ -59,8 +66,9 @@ type binding struct {
 type service struct {
 	opts *hotkey.Options
 
-	// live is the configuration in service. Presses read the padding from it,
-	// so a reload takes effect on the next press rather than at the next start.
+	// live is the configuration in service, kept for the grant path so a
+	// running program without permission can register as soon as the grant
+	// arrives. Registered bindings carry their own snapshot for presses.
 	live atomic.Pointer[config.Configuration]
 
 	mu sync.Mutex
@@ -74,17 +82,10 @@ type service struct {
 	keys     []*hotkey.Hotkey
 }
 
-func (s *service) padding() float64 {
-	if cfg := s.live.Load(); cfg != nil {
-		return cfg.PaddingPoints
-	}
-	return 0
-}
-
-func (s *service) dispatch(h *hotkey.Hotkey, placement geometry.Placement) {
+func (s *service) dispatch(h *hotkey.Hotkey, b binding) {
 	for range h.C() {
-		if err := place(placement, s.padding()); err != nil {
-			log.Printf("%s: %v", placement, err)
+		if err := place(b.grid, b.region, b.padding); err != nil {
+			log.Printf("%s (%s): %v", b.label, regionLabel(b.region), err)
 		}
 	}
 }
@@ -96,12 +97,12 @@ func (s *service) registerAll(bindings []binding) error {
 	for _, b := range bindings {
 		h, err := hotkey.Register(b.combo, s.opts)
 		if err != nil {
-			return fmt.Errorf("register %s (%s): %w", b.placement, b.label, err)
+			return fmt.Errorf("register %s (%s): %w", regionLabel(b.region), b.label, err)
 		}
 		s.keys = append(s.keys, h)
 		s.bindings = append(s.bindings, b)
-		log.Printf("registered %s → %s", h.Combo().Glyphs(), b.placement)
-		go s.dispatch(h, b.placement)
+		log.Printf("registered %s → %s", h.Combo().Glyphs(), regionLabel(b.region))
+		go s.dispatch(h, b)
 	}
 	return nil
 }
@@ -191,28 +192,59 @@ func (s *service) close() {
 }
 
 func parseBindings(cfg config.Configuration) ([]binding, error) {
-	result := make([]binding, 0, 8)
-	seen := map[hotkey.Combo]string{}
-	for _, entry := range cfg.Shortcuts.Entries() {
-		// Half-screen placements are optional: an empty binding disables it.
-		if strings.TrimSpace(entry.Binding) == "" {
-			continue
-		}
-		combo, err := shortcut.Parse(entry.Binding)
+	type entry struct {
+		label      string
+		comparison string
+		region     geometry.Region
+	}
+	entries := make([]entry, 0, len(cfg.Shortcuts))
+	for label, region := range cfg.Shortcuts {
+		comparison, err := shortcut.ComparisonKey(label)
 		if err != nil {
-			return nil, fmt.Errorf("shortcuts.%s: %w", entry.Name, err)
+			return nil, fmt.Errorf("shortcuts[%q]: %w", label, err)
 		}
-		if other, found := seen[combo]; found {
-			return nil, fmt.Errorf("shortcuts.%s duplicates shortcuts.%s", entry.Name, other)
+		entries = append(entries, entry{label: label, comparison: comparison, region: region})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].comparison != entries[j].comparison {
+			return entries[i].comparison < entries[j].comparison
 		}
-		seen[combo] = entry.Name
-		result = append(result, binding{placement: geometry.Placement(entry.Name), combo: combo, label: entry.Binding})
+		return entries[i].label < entries[j].label
+	})
+
+	grid := geometry.Grid{Rows: cfg.Rows, Columns: cfg.Columns}
+	result := make([]binding, 0, len(entries))
+	seenMappings := map[string]string{}
+	seenCombos := map[hotkey.Combo]string{}
+	for _, entry := range entries {
+		if other, found := seenMappings[entry.comparison]; found {
+			return nil, fmt.Errorf("shortcuts[%q] duplicates shortcuts[%q]", entry.label, other)
+		}
+		seenMappings[entry.comparison] = entry.label
+
+		combo, err := shortcut.Parse(entry.label)
+		if err != nil {
+			return nil, fmt.Errorf("shortcuts[%q]: %w", entry.label, err)
+		}
+		if other, found := seenCombos[combo]; found {
+			return nil, fmt.Errorf("shortcuts[%q] duplicates shortcuts[%q]", entry.label, other)
+		}
+		seenCombos[combo] = entry.label
+		result = append(result, binding{
+			grid:    grid,
+			region:  entry.region,
+			padding: cfg.PaddingPoints,
+			combo:   combo,
+			label:   entry.label,
+		})
 	}
 	return result, nil
 }
 
-func place(placement geometry.Placement, padding float64) error {
-	w, err := accessibility.FocusedWindow()
+func place(grid geometry.Grid, region geometry.Region, padding float64) error {
+	// focusedWindow is the library's focused-window query with a fallback for
+	// applications that do not answer it; it owns the handle it returns.
+	w, err := focusedWindow()
 	if err != nil {
 		return fmt.Errorf("focused window: %w", err)
 	}
@@ -233,9 +265,9 @@ func place(placement geometry.Placement, padding float64) error {
 	if err != nil {
 		return fmt.Errorf("usable display bounds: %w", err)
 	}
-	target, err := geometry.Target(
+	target, err := grid.Target(
 		geometry.Rect{X: area.X, Y: area.Y, W: area.W, H: area.H},
-		placement, padding,
+		region, padding,
 	)
 	if err != nil {
 		return err
@@ -272,7 +304,7 @@ func run() error {
 	}
 	log.Printf("configuration: %s", *configPath)
 	for _, b := range bindings {
-		log.Printf("  %-14s %s", b.placement, b.label)
+		log.Printf("  %-28s %s", b.label, regionLabel(b.region))
 	}
 	if *check {
 		log.Print("configuration is valid")

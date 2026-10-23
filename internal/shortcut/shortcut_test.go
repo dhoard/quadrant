@@ -133,7 +133,6 @@ func TestSymbols(t *testing.T) {
 		{"control+command+-", hotkey.KeyMinus, false},
 		{"control+command+_", hotkey.KeyMinus, true},
 		{"control+command+=", hotkey.KeyEqual, false},
-		{"control+command++", hotkey.KeyEqual, true},
 		{"control+command+[", hotkey.KeyLeftBracket, false},
 		{"control+command+{", hotkey.KeyLeftBracket, true},
 		{"control+command+]", hotkey.KeyRightBracket, false},
@@ -168,13 +167,50 @@ func TestSymbols(t *testing.T) {
 
 func TestLiteralPlus(t *testing.T) {
 	want := hotkey.Combo{Key: hotkey.KeyEqual, Mods: hotkey.Control | hotkey.Command | hotkey.Shift}
+	if got := mustParse(t, "control+command+plus"); got != want {
+		t.Errorf("got %+v; want %+v", got, want)
+	}
+	for _, input := range []string{"control+command++", "control+command+\\+"} {
+		if got, err := Parse(input); err == nil {
+			t.Errorf("Parse(%q) = %+v; want an error", input, got)
+		}
+	}
+}
+
+func TestComparisonKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"control+command+1", "control+command+1"},
+		{"command+control+1", "control+command+1"},
+		{"Command+Control+1", "Control+Command+1"},
+		{"option+shift+command+control+a", "control+command+shift+option+a"},
+		{"control+command+A", "control+command+A"},
+		{"control+command+plus", "control+command+plus"},
+		{" control + command + 1 ", "control+command+1"},
+	}
+	for _, tc := range tests {
+		got, err := ComparisonKey(tc.input)
+		if err != nil || got != tc.want {
+			t.Errorf("ComparisonKey(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
+		}
+	}
+}
+
+func TestComparisonKeyRejectsBadBindings(t *testing.T) {
 	for _, input := range []string{
+		"",
+		"control",
+		"control+1+command",
+		"control+command+1+2",
 		"control+command++",
 		"control+command+\\+",
-		"control+command+plus",
+		"control+control+a",
+		"control+command+nosuchkey",
 	} {
-		if got := mustParse(t, input); got != want {
-			t.Errorf("%s: got %+v; want %+v", input, got, want)
+		if got, err := ComparisonKey(input); err == nil {
+			t.Errorf("ComparisonKey(%q) = %q; want an error", input, got)
 		}
 	}
 }
@@ -240,6 +276,10 @@ func TestBadBindings(t *testing.T) {
 		"control+command+command+a",
 		"shift+shift+a",
 		"option+option+a",
+		"control+command++",
+		"control+command+\\+",
+		"control+1+command",
+		"control+command+1+2",
 	}
 	for _, input := range inputs {
 		if got, err := Parse(input); err == nil {

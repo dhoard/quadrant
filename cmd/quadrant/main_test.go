@@ -1,71 +1,114 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-macos/hotkey"
 
 	"quadrant/internal/config"
+	"quadrant/internal/geometry"
 )
+
+func configWith(rows, columns int, shortcuts map[string]geometry.Region) config.Configuration {
+	return config.Configuration{
+		Rows:          rows,
+		Columns:       columns,
+		Shortcuts:     config.ShortcutMap(shortcuts),
+		PaddingPoints: 0,
+	}
+}
 
 // parseBindings is the gate every configuration passes before a live hot key is
 // touched, so what it refuses matters more than what it accepts.
 func TestParseBindings(t *testing.T) {
-	changed := func(change func(*config.Shortcuts)) config.Configuration {
-		cfg := config.Default()
-		change(&cfg.Shortcuts)
-		return cfg
-	}
-
 	tests := []struct {
 		name    string
 		cfg     config.Configuration
 		want    int
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "the defaults bind all eight placements",
-			cfg:  changed(func(*config.Shortcuts) {}),
+			cfg:  config.Default(),
 			want: 8,
 		},
 		{
-			name: "a configuration from before the halves were added",
-			cfg: changed(func(s *config.Shortcuts) {
-				s.LeftHalf, s.RightHalf, s.TopHalf, s.BottomHalf = "", "", "", ""
+			name: "the supplied 4x4 layout",
+			cfg: configWith(4, 4, map[string]geometry.Region{
+				"control+command+1": {Row: 1, Column: 1, RowSpan: 2, ColumnSpan: 2},
+				"control+command+2": {Row: 1, Column: 3, RowSpan: 2, ColumnSpan: 2},
 			}),
-			want: 4,
+			want: 2,
 		},
 		{
-			name: "an empty optional half is skipped, not registered",
-			cfg:  changed(func(s *config.Shortcuts) { s.LeftHalf = "  " }),
-			want: 7,
-		},
-		{
-			name:    "one combination for two placements",
-			cfg:     changed(func(s *config.Shortcuts) { s.TopRight = s.TopLeft }),
-			wantErr: true,
-		},
-		{
-			name:    "a key name nothing knows",
-			cfg:     changed(func(s *config.Shortcuts) { s.TopLeft = "control+command+nosuchkey" }),
-			wantErr: true,
-		},
-		{
-			name: "an implicit shift duplicate",
-			cfg: changed(func(s *config.Shortcuts) {
-				s.TopLeft = "control+command+!"
-				s.TopRight = "control+command+shift+1"
+			name: "modifier order is not a distinct mapping",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+1": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+				"command+control+1": {Row: 1, Column: 2, RowSpan: 1, ColumnSpan: 1},
 			}),
-			wantErr: true,
+			wantErr: "duplicates",
+		},
+		{
+			name: "case is compared, then rejected as a physical duplicate",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+A": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+				"control+command+a": {Row: 1, Column: 2, RowSpan: 1, ColumnSpan: 1},
+			}),
+			wantErr: "duplicates",
+		},
+		{
+			name: "shifted-symbol spelling is a physical duplicate",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+!":       {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+				"control+command+shift+1": {Row: 1, Column: 2, RowSpan: 1, ColumnSpan: 1},
+			}),
+			wantErr: "duplicates",
+		},
+		{
+			name: "two chords may deliberately share a region",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+1": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+				"control+command+2": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+			}),
+			want: 2,
+		},
+		{
+			name: "literal plus uses plus",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+plus": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+			}),
+			want: 1,
+		},
+		{
+			name: "escaped plus forms are rejected",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command++": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+			}),
+			wantErr: "empty modifier or key",
+		},
+		{
+			name: "key before modifier is rejected",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+1+command": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+			}),
+			wantErr: "unknown modifier",
+		},
+		{
+			name: "a key name nothing knows",
+			cfg: configWith(2, 2, map[string]geometry.Region{
+				"control+command+nosuchkey": {Row: 1, Column: 1, RowSpan: 1, ColumnSpan: 1},
+			}),
+			wantErr: "unknown key",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			bindings, err := parseBindings(tc.cfg)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("parseBindings accepted %+v, want an error", tc.cfg.Shortcuts)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("parseBindings error = %v; want one containing %q", err, tc.wantErr)
 				}
 				return
 			}
@@ -76,6 +119,32 @@ func TestParseBindings(t *testing.T) {
 				t.Errorf("got %d bindings, want %d", len(bindings), tc.want)
 			}
 		})
+	}
+}
+
+func TestParseBindingsCarriesGridRegionAndPadding(t *testing.T) {
+	cfg := configWith(4, 4, map[string]geometry.Region{
+		"control+command+2": {Row: 1, Column: 3, RowSpan: 2, ColumnSpan: 2},
+		"control+command+1": {Row: 1, Column: 1, RowSpan: 2, ColumnSpan: 2},
+	})
+	cfg.PaddingPoints = 12
+
+	bindings, err := parseBindings(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("got %d bindings, want 2", len(bindings))
+	}
+	// Entries are sorted by their canonical comparison key.
+	if bindings[0].label != "control+command+1" || bindings[1].label != "control+command+2" {
+		t.Errorf("binding order = %q, %q", bindings[0].label, bindings[1].label)
+	}
+	want := geometry.Region{Row: 1, Column: 1, RowSpan: 2, ColumnSpan: 2}
+	if bindings[0].grid != (geometry.Grid{Rows: 4, Columns: 4}) ||
+		bindings[0].region != want ||
+		bindings[0].padding != 12 {
+		t.Errorf("first binding = %+v; want grid 4x4, region %+v, padding 12", bindings[0], want)
 	}
 }
 
