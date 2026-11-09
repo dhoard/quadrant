@@ -204,53 +204,70 @@ func (c Configuration) Validate() error {
 // than re-reading the file and getting it a second time, which would swallow a
 // change made in between.
 func LoadOrCreate(path string) (Configuration, []byte, error) {
-	b, err := os.ReadFile(path)
+	_, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		def := Default()
-		if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return Configuration{}, nil, fmt.Errorf("create config directory: %w", err)
-		}
-		b, err = json.MarshalIndent(def, "", "  ")
+		b, err := json.MarshalIndent(Default(), "", "  ")
 		if err != nil {
 			return Configuration{}, nil, err
 		}
 		b = append(b, '\n')
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return Configuration{}, nil, fmt.Errorf("create config directory: %w", err)
+		}
 		// Exclusive creation prevents replacing a file created by another run.
 		f, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if errors.Is(createErr, os.ErrExist) {
-			return LoadOrCreate(path)
-		}
-		if createErr != nil {
+		if createErr != nil && !errors.Is(createErr, os.ErrExist) {
 			return Configuration{}, nil, fmt.Errorf("create config: %w", createErr)
 		}
-		_, writeErr := f.Write(b)
-		closeErr := f.Close()
-		if writeErr != nil {
-			return Configuration{}, nil, fmt.Errorf("write config: %w", writeErr)
+		if createErr == nil {
+			_, writeErr := f.Write(b)
+			closeErr := f.Close()
+			if writeErr != nil {
+				return Configuration{}, nil, fmt.Errorf("write config: %w", writeErr)
+			}
+			if closeErr != nil {
+				return Configuration{}, nil, fmt.Errorf("close config: %w", closeErr)
+			}
 		}
-		if closeErr != nil {
-			return Configuration{}, nil, fmt.Errorf("close config: %w", closeErr)
-		}
-	} else if err != nil {
+	}
+	return Load(path)
+}
+
+// Load reads and validates the file at path without ever creating it, and
+// returns the raw content the configuration was decoded from.
+func Load(path string) (Configuration, []byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
 		return Configuration{}, nil, fmt.Errorf("read config: %w", err)
 	}
+	cfg, err := Parse(path, b)
+	if err != nil {
+		return Configuration{}, nil, err
+	}
+	return cfg, b, nil
+}
 
+// Parse decodes and validates configuration content that has already been
+// read. path is used only to name the file in error messages. Watch parses the
+// bytes it compared rather than reading the file again, so what it applies is
+// exactly what it saw, and a file deleted in between cannot be recreated.
+func Parse(path string, b []byte) (Configuration, error) {
 	var cfg Configuration
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
-		return Configuration{}, nil, fmt.Errorf("parse %s: %w%s", path, err, formatHint)
+		return Configuration{}, fmt.Errorf("parse %s: %w%s", path, err, formatHint)
 	}
 	// Reject concatenated JSON documents as well as trailing garbage.
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return Configuration{}, nil, fmt.Errorf("parse %s: multiple JSON values%s", path, formatHint)
+			return Configuration{}, fmt.Errorf("parse %s: multiple JSON values%s", path, formatHint)
 		}
-		return Configuration{}, nil, fmt.Errorf("parse %s: %w%s", path, err, formatHint)
+		return Configuration{}, fmt.Errorf("parse %s: %w%s", path, err, formatHint)
 	}
 	if err := cfg.Validate(); err != nil {
-		return Configuration{}, nil, fmt.Errorf("invalid %s: %w", path, err)
+		return Configuration{}, fmt.Errorf("invalid %s: %w", path, err)
 	}
-	return cfg, b, nil
+	return cfg, nil
 }

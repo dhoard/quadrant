@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/go-macos/accessibility"
 )
@@ -169,8 +170,11 @@ func frontmostWindow() (window, error) {
 // Two can claim it in the instant an application switch is under way; the first
 // is as good a guess as the second, and better than moving nothing.
 func frontmostApp(apps []accessibility.Application) (accessibility.Application, bool) {
+	// This program is never the one to move: opening its About panel makes it
+	// the active application, and its own panel is not a window to arrange.
+	self := os.Getpid()
 	for _, app := range apps {
-		if app.Active {
+		if app.Active && app.PID != self {
 			return app, true
 		}
 	}

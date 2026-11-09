@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -289,4 +290,28 @@ func writeTemp(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// Load is for validation only: a missing file is an error, never a new file.
+func TestLoadDoesNotCreateTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	if _, _, err := Load(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load of a missing file = %v, want ErrNotExist", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("Load created the file")
+	}
+}
+
+func TestParseValidatesContent(t *testing.T) {
+	good, err := json.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse("x.json", good); err != nil {
+		t.Fatalf("Parse of the defaults: %v", err)
+	}
+	if _, err := Parse("x.json", []byte(`{"rows":0}`)); err == nil {
+		t.Fatal("Parse accepted an invalid configuration")
+	}
 }

@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -42,6 +43,10 @@ const (
 	// Accessibility grant asks macOS whether it has appeared. It is the silent
 	// check, which shows no dialog, so the wait costs the user nothing.
 	grantPoll = 2 * time.Second
+
+	// grantRetry is how often a failed claim of the shortcuts is tried again
+	// once the Accessibility grant exists.
+	grantRetry = 5 * time.Second
 )
 
 // version is the version the About panel shows. build.sh replaces it with the
@@ -77,7 +82,11 @@ type service struct {
 	// claimed without it: a shortcut that cannot move a window answers every
 	// press with an error instead of working, so the keys wait, and grant
 	// claims them the moment permission arrives.
-	granted  bool
+	granted bool
+
+	// closed is set by close. A reload or grant that was already under way when
+	// shutdown began must not claim hot keys that nothing will release.
+	closed   bool
 	bindings []binding
 	keys     []*hotkey.Hotkey
 }
@@ -152,6 +161,9 @@ func (s *service) apply(cfg config.Configuration) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
 	// With no grant there is nothing to register; the configuration is kept and
 	// grant applies it when permission arrives.
 	if s.granted {
@@ -163,31 +175,62 @@ func (s *service) apply(cfg config.Configuration) error {
 	return nil
 }
 
-// grant records that the Accessibility grant has been given and claims the
-// shortcuts for the configuration in service. It is the one call that turns a
-// running program without permission into a working one, without a restart.
+// grant claims the shortcuts for the configuration in service now that the
+// Accessibility grant exists. It is the one call that turns a running program
+// without permission into a working one, without a restart.
+//
+// The grant is recorded only once the keys are claimed. A claim that fails -- a
+// combination another process holds at that moment -- leaves the service
+// without the grant, so the call can be made again; retryGrant does so until it
+// succeeds. Recording it first would make every later call a no-op and leave
+// the program running with no shortcuts until the configuration next changed.
 func (s *service) grant() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.granted {
+	if s.granted || s.closed {
 		return nil
+	}
+	if cfg := s.live.Load(); cfg != nil {
+		bindings, err := parseBindings(*cfg)
+		if err != nil {
+			return err
+		}
+		if err := s.swap(bindings); err != nil {
+			return err
+		}
 	}
 	s.granted = true
-	cfg := s.live.Load()
-	if cfg == nil {
-		return nil
+	return nil
+}
+
+// retryGrant calls try every interval until it succeeds or ctx is done. A
+// failure is logged when it first appears and again only when its message
+// changes, so a combination held by another application costs one line, not
+// one per attempt.
+func retryGrant(ctx context.Context, interval time.Duration, try func() error, logf func(error)) {
+	var last string
+	for {
+		err := try()
+		if err == nil {
+			return
+		}
+		if msg := err.Error(); msg != last {
+			last = msg
+			logf(err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
 	}
-	bindings, err := parseBindings(*cfg)
-	if err != nil {
-		return err
-	}
-	return s.swap(bindings)
 }
 
 // close releases the live hot keys at shutdown.
 func (s *service) close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	s.closeAll()
 }
 
@@ -294,7 +337,20 @@ func run() error {
 	configPath := flag.String("config", defaultPath, "configuration JSON path (watched for changes while running)")
 	check := flag.Bool("check-config", false, "validate the config and print shortcuts without starting or watching")
 	flag.Parse()
-	cfg, content, err := config.LoadOrCreate(*configPath)
+	var (
+		cfg     config.Configuration
+		content []byte
+	)
+	if *check {
+		// Validation only: it must not create the file the way a start does.
+		cfg, content, err = config.Load(*configPath)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Printf("no configuration at %s; validating the defaults a start would create", *configPath)
+			cfg, content, err = config.Default(), nil, nil
+		}
+	} else {
+		cfg, content, err = config.LoadOrCreate(*configPath)
+	}
 	if err != nil {
 		return err
 	}
@@ -356,9 +412,9 @@ func run() error {
 	if !trust.Trusted {
 		go grant.Watch(running, grantPoll, accessibility.Trusted, func() {
 			log.Print("Accessibility permission granted; registering the shortcuts")
-			if err := svc.grant(); err != nil {
-				log.Printf("shortcuts after the Accessibility grant: %v (change it in %s)", err, *configPath)
-			}
+			retryGrant(running, grantRetry, svc.grant, func(err error) {
+				log.Printf("shortcuts after the Accessibility grant: %v (retrying; change it in %s)", err, *configPath)
+			})
 		})
 	}
 

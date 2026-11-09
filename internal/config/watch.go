@@ -26,7 +26,7 @@ const ReloadInterval = 30 * time.Second
 // nothing at all, so a ticker that finds no change produces no output and the
 // file is not re-parsed.
 //
-// When the bytes differ, the file is loaded with LoadOrCreate. A file that
+// When the bytes differ, they are parsed and validated with Parse. A file that
 // fails to load or validate is NOT applied: the configuration currently in
 // effect stays in place, exactly one warning is logged, and the rejected
 // content is remembered so that a bad file left on disk is reported once rather
@@ -73,17 +73,17 @@ func Watch(ctx context.Context, path string, interval time.Duration, current []b
 		if bytes.Equal(content, observed) {
 			continue
 		}
+		// Parse the bytes just compared, not the file again: the content that
+		// is validated, applied and remembered is one and the same, a change
+		// saved after this read is seen by the next poll, and a file removed
+		// in between cannot be recreated with the defaults.
 		observed = content
 
-		cfg, loaded, err := LoadOrCreate(path)
+		cfg, err := Parse(path, content)
 		if err != nil {
 			log.Printf("configuration not reloaded: %v (keeping the running configuration)", err)
 			continue
 		}
-		// Compare later polls against the bytes this configuration was actually
-		// decoded from: a file that changed while it was being read is then
-		// picked up by the next poll instead of being missed.
-		observed = loaded
 		if err := apply(cfg); err != nil {
 			log.Printf("configuration not reloaded: %v (keeping the running configuration)", err)
 			continue

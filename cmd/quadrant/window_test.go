@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -405,5 +406,21 @@ func TestFrontmostApp(t *testing.T) {
 	}
 	if _, ok := frontmostApp(nil); ok {
 		t.Error("frontmostApp found an application in an empty list")
+	}
+}
+
+// Opening the About panel makes this program the active application; it must
+// never be chosen as the window to move.
+func TestFrontmostAppSkipsThisProgram(t *testing.T) {
+	apps := []accessibility.Application{
+		{PID: os.Getpid(), Name: "Quadrant", Active: true},
+		{PID: os.Getpid() + 1, Name: "Chrome", Active: true},
+	}
+	got, ok := frontmostApp(apps)
+	if !ok || got.PID != os.Getpid()+1 {
+		t.Errorf("frontmostApp = %v, %v; want Chrome", got, ok)
+	}
+	if _, ok := frontmostApp(apps[:1]); ok {
+		t.Error("frontmostApp chose this program")
 	}
 }

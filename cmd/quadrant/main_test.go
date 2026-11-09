@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-macos/hotkey"
 
@@ -179,4 +182,56 @@ func TestHotKeysWaitForTheGrant(t *testing.T) {
 		t.Fatalf("second grant: %v", err)
 	}
 	svc.close()
+}
+
+// A failed claim must be retried, and must be logged once while the reason does
+// not change.
+func TestRetryGrantTriesUntilItSucceeds(t *testing.T) {
+	calls := 0
+	var logged []error
+	try := func() error {
+		calls++
+		if calls < 4 {
+			return errors.New("combination already taken")
+		}
+		return nil
+	}
+	retryGrant(context.Background(), time.Millisecond, try, func(err error) { logged = append(logged, err) })
+	if calls != 4 {
+		t.Errorf("try called %d times, want 4", calls)
+	}
+	if len(logged) != 1 {
+		t.Errorf("logged %d times for one unchanged failure, want 1", len(logged))
+	}
+}
+
+func TestRetryGrantStopsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	retryGrant(ctx, time.Hour, func() error {
+		calls++
+		cancel()
+		return errors.New("still taken")
+	}, func(error) {})
+	if calls != 1 {
+		t.Errorf("try called %d times after cancellation, want 1", calls)
+	}
+}
+
+// After shutdown has begun, a reload or grant that was already under way must
+// not claim hot keys that nothing will release.
+func TestClosedServiceClaimsNothing(t *testing.T) {
+	svc := &service{opts: &hotkey.Options{}, granted: true}
+	svc.close()
+	cfg := config.Configuration{}
+	if err := svc.apply(cfg); err != nil {
+		t.Fatalf("apply after close: %v", err)
+	}
+	if svc.live.Load() != nil {
+		t.Error("apply after close still replaced the configuration in service")
+	}
+	svc.granted = false
+	if err := svc.grant(); err != nil || svc.granted {
+		t.Errorf("grant after close = %v, granted %v; want a no-op", err, svc.granted)
+	}
 }
